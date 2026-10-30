@@ -1,0 +1,309 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DesignLedger v2.1 Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        /* 承接 v2.0 的工业风 UI */
+        :root { --accent: #FFB800; --bg: #0A0A0A; --card: #161616; --border: #262626; }
+        body { background-color: var(--bg); color: #E5E5E5; font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .card { background-color: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+        .accent-bar { border-left: 4px solid var(--accent); }
+        .btn-primary { background-color: var(--accent); color: #000; font-weight: 900; }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.98); z-index: 1000; padding: 20px; overflow-y: auto; }
+        .details-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+        .expanded .details-content { max-height: 800px; }
+        .expanded .arrow-icon { transform: rotate(180deg); }
+    </style>
+</head>
+<body class="max-w-md mx-auto min-h-screen flex flex-col pb-28">
+
+    <header class="p-6 pb-2 sticky top-0 bg-[#0A0A0A] z-40 border-b border-gray-900">
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-2xl font-black italic tracking-tighter uppercase">DesignLedger v2.1</h1>
+            <button onclick="toggleSystemModal(true)" class="p-2 border border-gray-800 rounded-full">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+            </button>
+        </div>
+        <select id="project-selector" onchange="switchProject()" class="text-xs font-black uppercase bg-transparent text-orange-400 mb-4"></select>
+
+        <!-- 分类概览：点击可折叠/展开看明细 -->
+        <div id="category-summary-lite" class="grid grid-cols-3 gap-2 mb-4">
+            <!-- 自动注入分类汇总 -->
+        </div>
+    </header>
+
+    <main id="entry-list-container" class="p-4 space-y-3 flex-grow"></main>
+
+    <!-- 底部导航 -->
+    <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#0A0A0A]/95 border-t border-gray-900 flex justify-around py-4 z-50">
+        <button onclick="openEntryModal()" class="w-14 h-14 bg-orange-500 rounded-full -mt-10 shadow-2xl flex items-center justify-center text-black active:scale-90 transition">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" d="M12 4v16m8-8H4"></path></svg>
+        </button>
+    </div>
+
+    <!-- 弹窗：系统管理 (集成了备份、导出照片、统计) -->
+    <div id="system-modal" class="modal">
+        <div class="flex justify-between items-center mb-8"><h2 class="text-xl font-black italic">系统管理 & 导出</h2><button onclick="toggleSystemModal(false)" class="text-2xl text-gray-500">×</button></div>
+        <div class="space-y-4">
+            <div class="card p-4 space-y-3 border-orange-500/50">
+                <h3 class="text-xs font-bold text-orange-500 uppercase">1. 物料全量导出 (含照片)</h3>
+                <p class="text-[10px] text-gray-400 italic">将所有账单和照片打包为 .ZIP，图片按名称存放。供发给客户或存档。</p>
+                <button onclick="exportArchiveWithPhotos()" class="w-full btn-primary py-3 rounded font-black italic">导出照片+Excel压缩包</button>
+            </div>
+
+            <div class="card p-4 space-y-3">
+                <h3 class="text-xs font-bold text-gray-500 uppercase">2. 数据库备份文件 (.JSON)</h3>
+                <p class="text-[10px] text-gray-400 italic">用于在其他手机或本 App 升级时恢复完整数据。是一份物理文件。</p>
+                <button onclick="exportJSONFile()" class="w-full bg-gray-800 py-3 text-xs font-bold rounded">下载数据库备份文件</button>
+                <button onclick="document.getElementById('import-input').click()" class="w-full bg-red-950/20 border border-red-900 text-red-500 py-3 text-xs font-bold rounded mt-2 uppercase">从此文件还原数据</button>
+                <input type="file" id="import-input" accept=".json" class="hidden" onchange="importJSONFile(event)">
+            </div>
+
+            <div class="card p-4 space-y-3">
+                <h3 class="text-xs font-bold text-gray-500 uppercase">3. 项目管理</h3>
+                <button onclick="toggleProjectModal(true)" class="w-full bg-gray-800 py-3 text-xs font-bold rounded uppercase tracking-widest">+ 新建/切换项目</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 弹窗：录入逻辑 (同 v2.0，支持单价/数量/权重) -->
+    <div id="entry-modal" class="modal">
+        <div class="flex justify-between items-center mb-6"><h2 id="modal-title" class="text-xl font-black italic">录入物料</h2><button onclick="toggleEntryModal(false)" class="text-gray-500 text-2xl">×</button></div>
+        <form id="entry-form" class="space-y-4 pb-12">
+            <input type="hidden" id="in-id">
+            <input type="text" id="in-name" placeholder="材料名称 (如: 莫兰迪艺术漆)" required>
+            <div class="grid grid-cols-2 gap-2">
+                <input type="number" id="in-price" placeholder="单价" step="0.01">
+                <input type="number" id="in-qty" placeholder="数量" step="0.1">
+            </div>
+            <select id="in-category">
+                <option>硬装施工</option><option>主材设备</option><option>家具软装</option><option>人工费用</option><option>其他</option>
+            </select>
+            <textarea id="in-memo" rows="3" placeholder="备注工艺、色号、避坑建议..."></textarea>
+            <input type="file" id="in-photo" accept="image/*" class="text-xs">
+            <div id="photo-preview" class="hidden"><img class="w-24 h-24 object-cover border border-gray-800 rounded"></div>
+            <button type="submit" class="w-full btn-primary py-4 font-black italic rounded shadow-xl">保存流水</button>
+            <button type="button" id="del-btn" onclick="handleDelete()" class="hidden w-full bg-red-950 text-red-500 py-2 text-xs font-bold rounded uppercase">删除此项</button>
+        </form>
+    </div>
+
+    <div id="project-modal" class="modal">
+        <div class="flex justify-between items-center mb-8"><h2 class="text-xl font-black">项目管家</h2><button onclick="toggleProjectModal(false)" class="text-gray-400">关闭</button></div>
+        <form id="project-form" class="space-y-4">
+            <input type="text" id="p-name" placeholder="新项目/客户名称" required>
+            <input type="number" id="p-budget" placeholder="预算总上限" required>
+            <button type="submit" class="w-full btn-primary py-3 font-black">创建项目</button>
+        </form>
+        <div id="project-list" class="mt-8 space-y-2"></div>
+    </div>
+
+    <script>
+        const db = new Dexie("DesignLedger_V2_1");
+        db.version(1).stores({
+            projects: '++id, name, budget',
+            entries: '++id, projectId, name, amount, category, price, qty, date, photo, memo'
+        });
+
+        let currentProjectId = null;
+        let existingPhoto = "";
+
+        async function init() {
+            const ps = await db.projects.toArray();
+            if (ps.length === 0) {
+                currentProjectId = await db.projects.add({ name: "首个装修工程", budget: 300000 });
+            } else {
+                currentProjectId = ps[0].id;
+            }
+            renderProjectSelector();
+            renderAll();
+        }
+
+        // --- 核心：包含照片的 ZIP 导出 ---
+        async function exportArchiveWithPhotos() {
+            const project = await db.projects.get(currentProjectId);
+            const ens = await db.entries.where('projectId').equals(currentProjectId).toArray();
+            if (ens.length === 0) return alert("暂无数据可导出");
+
+            alert("正在生成压缩包，请稍候（照片较多时可能需要几秒）...");
+            const zip = new JSZip();
+            const photosFolder = zip.folder("photos");
+
+            // 生成 Excel
+            const excelData = ens.map(e => ({
+                '分类': e.category, '材料名': e.name, '金额': e.amount, 
+                '单价': e.price, '数量': e.qty, '日期': e.date, 
+                '照片文件名': e.photo ? `${e.id}.jpg` : '无', '备注': e.memo
+            }));
+            const ws = XLSX.utils.json_to_sheet(excelData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "清单");
+            const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            zip.file(`${project.name}_财务明细.xlsx`, excelBuffer);
+
+            // 处理照片
+            ens.forEach(e => {
+                if (e.photo && e.photo.includes("base64,")) {
+                    const base64Data = e.photo.split("base64,")[1];
+                    photosFolder.file(`${e.id}.jpg`, base64Data, { base64: true });
+                }
+            });
+
+            const content = await zip.generateAsync({ type: "blob" });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(content);
+            a.download = `${project.name}_物料全档案_${new Date().toLocaleDateString()}.zip`;
+            a.click();
+        }
+
+        // --- 分类统计汇总 ---
+        async function renderCategorySummary(ens) {
+            const summaryDiv = document.getElementById('category-summary-lite');
+            const totals = {};
+            ens.forEach(e => totals[e.category] = (totals[e.category] || 0) + e.amount);
+
+            const cats = ["硬装施工", "主材设备", "家具软装", "人工费用", "其他"];
+            summaryDiv.innerHTML = cats.map(c => `
+                <div class="card p-2 text-center border-none bg-zinc-900/50">
+                    <p class="text-[8px] text-gray-500 font-bold uppercase truncate">${c}</p>
+                    <p class="mono text-[10px] font-bold italic mt-1">¥${Math.round(totals[c] || 0).toLocaleString()}</p>
+                </div>
+            `).join('');
+        }
+
+        // --- 视图渲染 (折叠模式) ---
+        async function renderAll() {
+            const p = await db.projects.get(currentProjectId);
+            if(!p) return init();
+            document.getElementById('current-project-name').innerText = p.name;
+            const ens = await db.entries.where('projectId').equals(currentProjectId).toArray();
+
+            const list = document.getElementById('entry-list-container');
+            let totalSpent = 0;
+
+            list.innerHTML = ens.length ? ens.reverse().map(e => {
+                totalSpent += e.amount;
+                return `
+                    <div class="card overflow-hidden" id="entry-${e.id}">
+                        <div class="p-4 flex justify-between items-center" onclick="toggleEntry(${e.id})">
+                            <div class="overflow-hidden">
+                                <span class="text-[8px] font-black text-gray-500 uppercase">${e.category}</span>
+                                <h3 class="text-sm font-bold uppercase truncate mt-0.5">${e.name}</h3>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="mono font-bold italic text-white">¥${e.amount.toLocaleString()}</span>
+                                <svg class="w-4 h-4 text-gray-600 arrow-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" d="M19 9l-7 7-7-7"></path></svg>
+                            </div>
+                        </div>
+                        <div class="details-content bg-zinc-900/30">
+                            <div class="p-4 pt-0 space-y-4 border-t border-gray-800/50">
+                                <div class="grid grid-cols-2 gap-4 mt-4 text-[10px]">
+                                    <div><p class="text-gray-500 font-bold">明细</p><p class="mono mt-1">¥${e.price || 0} × ${e.qty || 1}</p></div>
+                                    <div><p class="text-gray-500 font-bold">日期</p><p class="mono mt-1 uppercase">${e.date}</p></div>
+                                </div>
+                                ${e.photo ? `<img src="${e.photo}" class="w-full rounded border border-gray-800 grayscale active:grayscale-0">` : ''}
+                                <div class="p-2 bg-black/40 text-[10px] text-gray-400 italic border-l-2 border-orange-500">${e.memo || '无描述'}</div>
+                                <button onclick="openEntryModal(${e.id})" class="w-full py-2 bg-zinc-800 text-[9px] font-black uppercase text-gray-400 rounded">修改明细</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('') : '<div class="text-center py-20 text-[10px] text-gray-700 font-black tracking-widest uppercase italic">Empty Journal</div>';
+
+            renderCategorySummary(ens);
+        }
+
+        function toggleEntry(id) { document.getElementById('entry-' + id).classList.toggle('expanded'); }
+        function toggleSystemModal(s) { document.getElementById('system-modal').style.display = s ? 'block' : 'none'; }
+        function toggleEntryModal(s) { document.getElementById('entry-modal').style.display = s ? 'block' : 'none'; }
+        function toggleProjectModal(s) { document.getElementById('project-modal').style.display = s ? 'block' : 'none'; }
+
+        async function openEntryModal(id = null) {
+            const f = document.getElementById('entry-form');
+            f.reset(); existingPhoto = "";
+            document.getElementById('photo-preview').classList.add('hidden');
+            if (id) {
+                const e = await db.entries.get(id);
+                document.getElementById('in-id').value = id;
+                document.getElementById('in-name').value = e.name;
+                document.getElementById('in-price').value = e.price;
+                document.getElementById('in-qty').value = e.qty;
+                document.getElementById('in-category').value = e.category;
+                document.getElementById('in-memo').value = e.memo;
+                document.getElementById('modal-title').innerText = "编辑物料";
+                document.getElementById('del-btn').classList.remove('hidden');
+                if (e.photo) { existingPhoto = e.photo; document.getElementById('photo-preview').classList.remove('hidden'); document.getElementById('photo-preview').querySelector('img').src = e.photo; }
+            } else {
+                document.getElementById('in-id').value = "";
+                document.getElementById('modal-title').innerText = "录入物料";
+                document.getElementById('del-btn').classList.add('hidden');
+            }
+            toggleEntryModal(true);
+        }
+
+        document.getElementById('entry-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('in-id').value;
+            const file = document.getElementById('in-photo').files[0];
+            let photo = existingPhoto;
+            if (file) photo = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r(rd.result); rd.readAsDataURL(file); });
+            const p = parseFloat(document.getElementById('in-price').value) || 0;
+            const q = parseFloat(document.getElementById('in-qty').value) || 1;
+            const data = { projectId: currentProjectId, name: document.getElementById('in-name').value, amount: p*q, price: p, qty: q, category: document.getElementById('in-category').value, memo: document.getElementById('in-memo').value, date: new Date().toLocaleDateString(), photo: photo };
+            if (id) await db.entries.update(parseInt(id), data);
+            else await db.entries.add(data);
+            toggleEntryModal(false); renderAll();
+        };
+
+        // --- 物理文件备份还原 ---
+        async function exportJSONFile() {
+            const data = { ps: await db.projects.toArray(), es: await db.entries.toArray() };
+            const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `DesignLedger_Backup_${new Date().toLocaleDateString()}.json`;
+            a.click();
+        }
+
+        async function importJSONFile(ev) {
+            const f = ev.target.files[0]; if (!f) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const d = JSON.parse(e.target.result);
+                if (confirm('警告：导入将清空当前所有数据！是否继续？')) {
+                    await db.projects.clear(); await db.entries.clear();
+                    await db.projects.bulkAdd(d.ps); await db.entries.bulkAdd(d.es);
+                    location.reload();
+                }
+            };
+            reader.readAsText(f);
+        }
+
+        async function renderProjectSelector() {
+            const ps = await db.projects.toArray();
+            document.getElementById('project-selector').innerHTML = ps.map(p => `<option value="${p.id}" ${p.id == currentProjectId ? 'selected' : ''}>${p.name}</option>`).join('');
+            document.getElementById('project-list').innerHTML = ps.map(p => `<div class="card p-3 flex justify-between text-[10px] font-bold"><span>${p.name}</span><button onclick="deleteProject(${p.id})" class="text-red-500">删除</button></div>`).join('');
+        }
+
+        async function switchProject() { currentProjectId = parseInt(document.getElementById('project-selector').value); renderAll(); }
+        document.getElementById('project-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const id = await db.projects.add({ name: document.getElementById('p-name').value, budget: parseFloat(document.getElementById('p-budget').value) });
+            currentProjectId = id; toggleProjectModal(false); init();
+        };
+
+        async function deleteProject(id) { if(confirm('确认删除项目？')) { await db.projects.delete(id); await db.entries.where('projectId').equals(id).delete(); init(); } }
+        async function handleDelete() { const id = document.getElementById('in-id').value; if(confirm('确认删除？')) { await db.entries.delete(parseInt(id)); toggleEntryModal(false); renderAll(); } }
+
+        init();
+    </script>
+</body>
+</html>
